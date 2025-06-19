@@ -3,57 +3,116 @@
 <!--[if IE 7]>         <html class="no-js lt-ie9 lt-ie8"> <![endif]-->
 <!--[if IE 8]>         <html class="no-js lt-ie9"> <![endif]-->
 <!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]-->
-    <head>
-        <meta charset="utf-8">
-        <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
-        <title></title>
-        <meta name="description" content="">
-        <meta name="viewport" content="width=device-width">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>Verify Email</title>
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width">
 
-        <!-- Place favicon.ico and apple-touch-icon.png in the root directory -->
-
-        <link rel="stylesheet" href="css/font.css">
-        <link rel="stylesheet" href="css/normalize.css">
-        <link rel="stylesheet" href="css/index.css">
-        <link rel="stylesheet" href="/css/message.css">
-    </head>
-    <body>
-        <!--[if lt IE 7]>
-            <p class="chromeframe">You are using an <strong>outdated</strong> browser. Please <a href="http://browsehappy.com/">upgrade your browser</a> or <a href="http://www.google.com/chromeframe/?redirect=true">activate Google Chrome Frame</a> to improve your experience.</p>
-        <![endif]-->
-
-        <div id="noCognitoMessage" class="configMessage" style="display: none;">
-            <div class="backdrop"></div>
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title">No Cognito User Pool Configured</h3>
-                </div>
-                <div class="panel-body">
-                    <p>There is no user pool configured in <a href="/js/config.js">/js/config.js</a>. You'll configure this in Module 2 of the workshop.</p>
-                </div>
-            </div>
+    <link rel="stylesheet" href="css/font.css">
+    <link rel="stylesheet" href="css/normalize.css">
+    <link rel="stylesheet" href="css/index.css">
+    <link rel="stylesheet" href="/css/message.css">
+  </head>
+  <body>
+    <div id="noCognitoMessage" class="configMessage" style="display: none;">
+      <div class="backdrop"></div>
+      <div class="panel panel-default">
+        <div class="panel-heading">
+          <h3 class="panel-title">No Cognito User Pool Configured</h3>
         </div>
+        <div class="panel-body">
+          <p>There is no user pool configured in <a href="/js/config.js">/js/config.js</a>. You'll configure this in Module 2 of the workshop.</p>
+        </div>
+      </div>
+    </div>
 
-        <header>
-          <img src="images/logo.png">
-        </header>
+    <header>
+      <img src="images/logo.png">
+    </header>
 
+    <section class="form-wrap">
+      <h1>Verify Email</h1>
+      <form id="verifyForm">
+        <input type="email" id="emailInputVerify" placeholder="Email" required>
+        <input type="text" id="codeInputVerify" placeholder="Verification Code" pattern=".*" required>
+        <input type="submit" value="Verify">
+      </form>
+    </section>
 
-        <section class="form-wrap">
-            <h1>Verify Email</h1>
-            <form id="verifyForm">
-              <input type="email" id="emailInputVerify" placeholder="Email" required>
-              <input type="text" id="codeInputVerify" placeholder="Verification Code" pattern=".*" required>
+    <script src="js/vendor/jquery-3.1.0.js"></script>
+    <script src="js/vendor/bootstrap.min.js"></script>
+    <script src="js/vendor/aws-cognito-sdk.min.js"></script>
+    <script src="js/vendor/amazon-cognito-identity.min.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/cognito-auth.js"></script>
 
-              <input type="submit" value="Verify">
-            </form>
-        </section>
+    <script>
+      $(document).ready(function () {
+        $('#verifyForm').submit(function (e) {
+          e.preventDefault();
 
-        <script src="js/vendor/jquery-3.1.0.js"></script>
-        <script src="js/vendor/bootstrap.min.js"></script>
-        <script src="js/vendor/aws-cognito-sdk.min.js"></script>
-        <script src="js/vendor/amazon-cognito-identity.min.js"></script>
-        <script src="js/config.js"></script>
-        <script src="js/cognito-auth.js"></script>
-    </body>
+          const email = $('#emailInputVerify').val();
+          const code = $('#codeInputVerify').val();
+
+          const userPool = new AmazonCognitoIdentity.CognitoUserPool({
+            UserPoolId: _config.cognito.userPoolId,
+            ClientId: _config.cognito.userPoolClientId
+          });
+
+          const userData = {
+            Username: email,
+            Pool: userPool
+          };
+
+          const cognitoUser = new AmazonCognitoIdentity.CognitoUser(userData);
+
+          cognitoUser.confirmRegistration(code, true, function (err, result) {
+            if (err) {
+              alert(err.message || JSON.stringify(err));
+              return;
+            }
+
+            console.log('Confirmation result:', result);
+
+            const authDetails = new AmazonCognitoIdentity.AuthenticationDetails({
+              Username: email,
+              Password: prompt("Re-enter your password to finish verification and receive unicorn dispatch emails:")
+            });
+
+            cognitoUser.authenticateUser(authDetails, {
+              onSuccess: function (session) {
+                const idToken = session.getIdToken().getJwtToken();
+
+                // Send request to /Subscribe endpoint to auto-subscribe this user to SNS
+                fetch("https://m3h4xw20j9.execute-api.us-east-1.amazonaws.com/dev/Subscribe", {
+                  method: "POST",
+                  headers: {
+                    Authorization: idToken,
+                    "Content-Type": "application/json"
+                  }
+                })
+                .then(res => res.json())
+                .then(data => {
+                  console.log("SNS subscription result:", data.message);
+                  alert("✅ You are verified! Please check your inbox to confirm the email subscription.");
+                  window.location.href = "signin.html"; // optional redirect
+                })
+                .catch(err => {
+                  console.error("SNS error:", err);
+                  alert("SNS subscription failed. Try again later.");
+                });
+              },
+              onFailure: function (authErr) {
+                console.error("Auth failed:", authErr);
+                alert("Authentication failed. Please check your password.");
+              }
+            });
+          });
+        });
+      });
+    </script>
+  </body>
 </html>
+
